@@ -1,4 +1,4 @@
-# clickhouse-matlab
+# Clickhouse-matlab
 
 ClickHouse driver for MATLAB. Speaks the native TCP protocol (not HTTP) via a MEX binding around [clickhouse-cpp](https://github.com/ClickHouse/clickhouse-cpp).
 
