@@ -1,0 +1,49 @@
+% test/run_all_tests.m
+function results = run_all_tests()
+    % run_all_tests  Run all ClickHouse MATLAB driver test suites.
+    %
+    % Usage:
+    %   cd /path/to/clickhouse-matlab
+    %   addpath(fullfile(pwd,'src'), fullfile(pwd,'test'))
+    %   run_all_tests()
+
+    suites = { ...
+        'TestConnection', ...
+        'TestQueryNumeric', ...
+        'TestQueryString', ...
+        'TestInsertNumeric', ...
+        'TestInsertString', ...
+        'TestArrayTypes', ...
+        'TestNullable', ...
+        'TestLogical', ...
+        'TestDateTime64', ...
+        'TestDateTypes', ...
+        'TestMissingTypes', ...
+        'TestInsertRecovery', ...
+        'TestRetry', ...
+    };
+
+    all_results = [];
+    for i = 1:numel(suites)
+        fprintf('\n=== %s ===\n', suites{i});
+        r = runtests(suites{i}, 'OutputDetail', 'Detailed');
+        all_results = [all_results, r]; %#ok<AGROW>
+    end
+
+    passed  = sum([all_results.Passed]);
+    failed  = sum([all_results.Failed]);
+    skipped = sum([all_results.Incomplete]);
+
+    fprintf('\n=== SUMMARY ===\n');
+    fprintf('Passed:  %d\n', passed);
+    fprintf('Failed:  %d\n', failed);
+    fprintf('Skipped: %d\n', skipped);
+
+    if nargout > 0
+        results = all_results;
+    end
+
+    if failed > 0
+        error('run_all_tests:failures', '%d test(s) failed.', failed);
+    end
+end
