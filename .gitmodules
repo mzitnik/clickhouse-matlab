@@ -1,0 +1,3 @@
+[submodule "contrib/clickhouse-cpp"]
+	path = contrib/clickhouse-cpp
+	url = https://github.com/ClickHouse/clickhouse-cpp.git
