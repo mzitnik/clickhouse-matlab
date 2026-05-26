@@ -1,6 +1,17 @@
 cmake_minimum_required(VERSION 3.20)
 project(clickhouse-matlab CXX)
 
+# ── Library version (single source of truth: version.txt) ───────────────────
+file(READ "${CMAKE_SOURCE_DIR}/version.txt" CLICKHOUSE_MATLAB_VERSION)
+string(STRIP "${CLICKHOUSE_MATLAB_VERSION}" CLICKHOUSE_MATLAB_VERSION)
+if(CLICKHOUSE_MATLAB_VERSION STREQUAL "")
+    message(FATAL_ERROR "version.txt is empty")
+endif()
+message(STATUS "clickhouse-matlab version: ${CLICKHOUSE_MATLAB_VERSION}")
+# Retrigger configure when version.txt changes so the -D flag updates.
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+    "${CMAKE_SOURCE_DIR}/version.txt")
+
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
@@ -148,3 +159,7 @@ else()
         LINK_FLAGS "-static-libstdc++ -static-libgcc"
     )
 endif()
+
+# ── Embed library version into the MEX as a compile-time string macro ───────
+target_compile_definitions(clickhouse_mex PRIVATE
+    CLICKHOUSE_MATLAB_VERSION="${CLICKHOUSE_MATLAB_VERSION}")

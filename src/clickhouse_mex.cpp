@@ -20,6 +20,10 @@
 #include <vector>
 #include <unordered_set>
 
+#ifndef CLICKHOUSE_MATLAB_VERSION
+#error "CLICKHOUSE_MATLAB_VERSION not defined by build system — set via CMake"
+#endif
+
 using namespace clickhouse;
 
 static std::unordered_map<uint64_t, Client*> g_clients;
@@ -154,6 +158,13 @@ static void cmd_delete(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[
         delete it->second;
         g_clients.erase(it);
     }
+}
+
+// ── version ──────────────────────────────────────────────────────────────────
+static void cmd_version(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[]) {
+    // No args required. The version is embedded at compile time via CMake.
+    (void)nlhs; (void)nrhs; (void)prhs;
+    plhs[0] = mxCreateString(CLICKHOUSE_MATLAB_VERSION);
 }
 
 // ── query ─────────────────────────────────────────────────────────────────────
@@ -1788,6 +1799,7 @@ void mexFunction(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[]) {
     else if (cmd == "insert")  cmd_insert (nlhs, plhs, nrhs, prhs);
     else if (cmd == "reconnect") cmd_reconnect(nlhs, plhs, nrhs, prhs);
     else if (cmd == "delete")  cmd_delete (nlhs, plhs, nrhs, prhs);
+    else if (cmd == "version") cmd_version(nlhs, plhs, nrhs, prhs);
     else
         mexErrMsgIdAndTxt("ClickHouse:unknownCommand", "Unknown command: %s", cmd.c_str());
 }
