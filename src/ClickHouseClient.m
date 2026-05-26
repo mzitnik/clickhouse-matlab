@@ -310,5 +310,10 @@ classdef ClickHouseClient < handle
                 obj.ptr = uint64(0);
             end
         end
+
+        function v = version(~)
+            % version  Return the clickhouse-matlab library version as a string.
+            v = string(clickhouse_mex('version'));
+        end
     end
 end
