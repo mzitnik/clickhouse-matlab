@@ -9,6 +9,7 @@ classdef TestInsertPerf < matlab.perftest.TestCase
 
     properties
         Client
+        SchemaMixed
     end
 
     properties (TestParameter)
@@ -26,6 +27,9 @@ classdef TestInsertPerf < matlab.perftest.TestCase
                 "CREATE TABLE IF NOT EXISTS ch_matlab_perf.insert_perf (" ...
                 "  c_int64 Int64, c_float64 Float64, c_string String" ...
                 ") ENGINE = Memory"]);
+            % Cache schema for the *WithSchema variant — measures the
+            % insert path without the per-call DESCRIBE round-trip.
+            tc.SchemaMixed = tc.Client.describe("ch_matlab_perf.insert_perf");
         end
     end
 
@@ -48,6 +52,22 @@ classdef TestInsertPerf < matlab.perftest.TestCase
 
             startMeasuring(tc);
             tc.Client.insert("ch_matlab_perf.insert_perf", data);
+            stopMeasuring(tc);
+        end
+
+        function insertMixedWithSchema(tc, NumRows)
+            % Same as insertMixed but passes the cached schema, isolating
+            % the cost of the per-insert DESCRIBE round-trip.
+            n = NumRows;
+            data = table( ...
+                int64((1:n)'), ...
+                rand(n, 1), ...
+                repmat("row_text", n, 1), ...
+                'VariableNames', {'c_int64', 'c_float64', 'c_string'});
+            tc.Client.query("TRUNCATE TABLE ch_matlab_perf.insert_perf");
+
+            startMeasuring(tc);
+            tc.Client.insert("ch_matlab_perf.insert_perf", data, tc.SchemaMixed);
             stopMeasuring(tc);
         end
     end

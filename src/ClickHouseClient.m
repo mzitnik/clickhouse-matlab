@@ -116,13 +116,29 @@ classdef ClickHouseClient < handle
             result = struct2table(s);
         end
 
-        function insert(obj, tableName, data)
+        function schema = describe(obj, tableName)
+            % describe  Return the table schema (DESCRIBE TABLE result).
+            %   Pass the returned table to insert() as the optional schema
+            %   argument to skip the per-insert DESCRIBE round-trip when
+            %   inserting into the same table repeatedly.
+            arguments
+                obj
+                tableName (1,1) string
+            end
+            schema = obj.query("DESCRIBE TABLE " + tableName);
+        end
+
+        function insert(obj, tableName, data, schema)
             % insert  Insert rows into a ClickHouse table.
             %   data can be a MATLAB table or a scalar struct of arrays.
+            %   schema (optional) — DESCRIBE TABLE result from obj.describe().
+            %   If omitted, it is fetched on demand. Pass it explicitly to
+            %   skip the round-trip on repeated inserts into the same table.
             arguments
                 obj
                 tableName (1,1) string
                 data
+                schema = []
             end
             if istable(data)
                 data = table2struct(data, 'ToScalar', true);
@@ -176,121 +192,125 @@ classdef ClickHouseClient < handle
                     end
                 end
             end
-            % Query table schema to detect Nullable columns.
-            % ClickHouse (particularly recent versions) rejects a plain ColumnFloat64
-            % inserted into a Nullable(Float64) column. We pass a ch_nullable_hint cell
-            % array of column names so MEX can force-wrap them in ColumnNullable.
-            try
-                desc = obj.query("DESCRIBE TABLE " + tableName);
-                if height(desc) > 0 && ismember('type', desc.Properties.VariableNames)
-                    data_fields = fieldnames(data);
-                    nullable_hint    = {};
-                    datetime64_hint  = struct();
-                    date_type_hint   = struct();
-                    nullable_int_hint = struct();
-                    lc_hint          = struct();
-                    ipv4_hint        = {};
-                    ipv6_hint        = {};
-                    enum_hint        = struct();
-                    fixedstring_hint = struct();
-                    decimal_hint     = struct();
-                    for i = 1:height(desc)
-                        col_name = char(desc.name(i));
-                        type_str = char(desc.type(i));
-                        if ~ismember(col_name, data_fields), continue; end
-                        if startsWith(type_str, 'Nullable(')
-                            nullable_hint{end+1} = col_name; %#ok<AGROW>
+            % Schema source: caller-provided (fast path, skips round-trip) or
+            % fetched on demand. The schema drives MEX-layer type hints —
+            % ClickHouse rejects plain ColumnFloat64 into Nullable(Float64),
+            % needs DateTime64 precision, LowCardinality inner type, etc.
+            if nargin < 4
+                try
+                    schema = obj.describe(tableName);
+                catch
+                    schema = [];
+                end
+            end
+            if ~isempty(schema) && istable(schema) && height(schema) > 0 && ...
+                    ismember('type', schema.Properties.VariableNames)
+                desc = schema;
+                data_fields = fieldnames(data);
+                nullable_hint    = {};
+                datetime64_hint  = struct();
+                date_type_hint   = struct();
+                nullable_int_hint = struct();
+                lc_hint          = struct();
+                ipv4_hint        = {};
+                ipv6_hint        = {};
+                enum_hint        = struct();
+                fixedstring_hint = struct();
+                decimal_hint     = struct();
+                for i = 1:height(desc)
+                    col_name = char(desc.name(i));
+                    type_str = char(desc.type(i));
+                    if ~ismember(col_name, data_fields), continue; end
+                    if startsWith(type_str, 'Nullable(')
+                        nullable_hint{end+1} = col_name; %#ok<AGROW>
+                    end
+                    % Detect DateTime64(N) or Nullable(DateTime64(N))
+                    tok = regexp(type_str, 'DateTime64\((\d+)', 'tokens', 'once');
+                    if ~isempty(tok)
+                        datetime64_hint.(col_name) = str2double(tok{1});
+                    end
+                    % Detect Date / Date32 / DateTime (non-DateTime64)
+                    if ~isempty(regexp(type_str, '^(Nullable\()?Date\)?\s*$', 'once')) || ...
+                            strcmp(type_str, 'Date') || strcmp(type_str, 'Nullable(Date)')
+                        date_type_hint.(col_name) = 'Date';
+                    elseif strcmp(type_str, 'Date32') || strcmp(type_str, 'Nullable(Date32)')
+                        date_type_hint.(col_name) = 'Date32';
+                    elseif ~isempty(regexp(type_str, '^(Nullable\()?DateTime(\(|''|\s*$)', 'once')) && ...
+                            isempty(regexp(type_str, 'DateTime64', 'once'))
+                        date_type_hint.(col_name) = 'DateTime';
+                    end
+                    % Detect Nullable(Int*/UInt*) for integer nullable insert
+                    ni_tok = regexp(type_str, '^Nullable\((Int8|Int16|Int32|Int64|UInt8|UInt16|UInt32|UInt64)\)$', 'tokens', 'once');
+                    if ~isempty(ni_tok)
+                        nullable_int_hint.(col_name) = ni_tok{1};
+                    end
+                    % Detect LowCardinality columns
+                    lc_tok = regexp(type_str, '^LowCardinality\((\w+)', 'tokens', 'once');
+                    if ~isempty(lc_tok)
+                        lc_hint.(col_name) = lc_tok{1};
+                    end
+                    % Strip Nullable wrapper for remaining detection
+                    bare_type = regexprep(type_str, '^Nullable\((.+)\)$', '$1');
+                    % IPv4 / IPv6
+                    if strcmp(bare_type, 'IPv4')
+                        ipv4_hint{end+1} = col_name; %#ok<AGROW>
+                    elseif strcmp(bare_type, 'IPv6')
+                        ipv6_hint{end+1} = col_name; %#ok<AGROW>
+                    end
+                    % FixedString(N)
+                    fs_tok = regexp(bare_type, '^FixedString\((\d+)\)$', 'tokens', 'once');
+                    if ~isempty(fs_tok)
+                        fixedstring_hint.(col_name) = str2double(fs_tok{1});
+                    end
+                    % Enum8/Enum16 — store the bare type string for MEX parsing
+                    if startsWith(bare_type, 'Enum8(') || startsWith(bare_type, 'Enum16(')
+                        enum_hint.(col_name) = bare_type;
+                    end
+                    % Decimal32/64/128(S) and Decimal(P,S)
+                    dec_tok = regexp(bare_type, '^Decimal(32|64|128)\((\d+)\)$', 'tokens', 'once');
+                    if ~isempty(dec_tok)
+                        dec_bits = dec_tok{1}; dec_scale = str2double(dec_tok{2});
+                        if strcmp(dec_bits,'32'), dec_prec = 9;
+                        elseif strcmp(dec_bits,'64'), dec_prec = 18;
+                        else, dec_prec = 38; end
+                        decimal_hint.(col_name) = [dec_prec, dec_scale];
+                    else
+                        dec_tok2 = regexp(bare_type, '^Decimal\((\d+),\s*(\d+)\)$', 'tokens', 'once');
+                        if ~isempty(dec_tok2)
+                            decimal_hint.(col_name) = [str2double(dec_tok2{1}), str2double(dec_tok2{2})];
                         end
-                        % Detect DateTime64(N) or Nullable(DateTime64(N))
-                        tok = regexp(type_str, 'DateTime64\((\d+)', 'tokens', 'once');
-                        if ~isempty(tok)
-                            datetime64_hint.(col_name) = str2double(tok{1});
-                        end
-                        % Detect Date / Date32 / DateTime (non-DateTime64)
-                        if ~isempty(regexp(type_str, '^(Nullable\()?Date\)?\s*$', 'once')) || ...
-                                strcmp(type_str, 'Date') || strcmp(type_str, 'Nullable(Date)')
-                            date_type_hint.(col_name) = 'Date';
-                        elseif strcmp(type_str, 'Date32') || strcmp(type_str, 'Nullable(Date32)')
-                            date_type_hint.(col_name) = 'Date32';
-                        elseif ~isempty(regexp(type_str, '^(Nullable\()?DateTime(\(|''|\s*$)', 'once')) && ...
-                                isempty(regexp(type_str, 'DateTime64', 'once'))
-                            date_type_hint.(col_name) = 'DateTime';
-                        end
-                        % Detect Nullable(Int*/UInt*) for integer nullable insert
-                        ni_tok = regexp(type_str, '^Nullable\((Int8|Int16|Int32|Int64|UInt8|UInt16|UInt32|UInt64)\)$', 'tokens', 'once');
-                        if ~isempty(ni_tok)
-                            nullable_int_hint.(col_name) = ni_tok{1};
-                        end
-                        % Detect LowCardinality columns
-                        lc_tok = regexp(type_str, '^LowCardinality\((\w+)', 'tokens', 'once');
-                        if ~isempty(lc_tok)
-                            lc_hint.(col_name) = lc_tok{1};
-                        end
-                        % Strip Nullable wrapper for remaining detection
-                        bare_type = regexprep(type_str, '^Nullable\((.+)\)$', '$1');
-                        % IPv4 / IPv6
-                        if strcmp(bare_type, 'IPv4')
-                            ipv4_hint{end+1} = col_name; %#ok<AGROW>
-                        elseif strcmp(bare_type, 'IPv6')
-                            ipv6_hint{end+1} = col_name; %#ok<AGROW>
-                        end
-                        % FixedString(N)
-                        fs_tok = regexp(bare_type, '^FixedString\((\d+)\)$', 'tokens', 'once');
-                        if ~isempty(fs_tok)
-                            fixedstring_hint.(col_name) = str2double(fs_tok{1});
-                        end
-                        % Enum8/Enum16 — store the bare type string for MEX parsing
-                        if startsWith(bare_type, 'Enum8(') || startsWith(bare_type, 'Enum16(')
-                            enum_hint.(col_name) = bare_type;
-                        end
-                        % Decimal32/64/128(S) and Decimal(P,S)
-                        dec_tok = regexp(bare_type, '^Decimal(32|64|128)\((\d+)\)$', 'tokens', 'once');
-                        if ~isempty(dec_tok)
-                            dec_bits = dec_tok{1}; dec_scale = str2double(dec_tok{2});
-                            if strcmp(dec_bits,'32'), dec_prec = 9;
-                            elseif strcmp(dec_bits,'64'), dec_prec = 18;
-                            else, dec_prec = 38; end
-                            decimal_hint.(col_name) = [dec_prec, dec_scale];
-                        else
-                            dec_tok2 = regexp(bare_type, '^Decimal\((\d+),\s*(\d+)\)$', 'tokens', 'once');
-                            if ~isempty(dec_tok2)
-                                decimal_hint.(col_name) = [str2double(dec_tok2{1}), str2double(dec_tok2{2})];
-                            end
-                        end
-                    end
-                    if ~isempty(nullable_hint)
-                        data.ch_nullable_hint = nullable_hint;
-                    end
-                    if ~isempty(fieldnames(datetime64_hint))
-                        data.ch_datetime64_hint = datetime64_hint;
-                    end
-                    if ~isempty(fieldnames(date_type_hint))
-                        data.ch_date_type_hint = date_type_hint;
-                    end
-                    if ~isempty(fieldnames(nullable_int_hint))
-                        data.ch_nullable_int_hint = nullable_int_hint;
-                    end
-                    if ~isempty(fieldnames(lc_hint))
-                        data.ch_lc_hint = lc_hint;
-                    end
-                    if ~isempty(ipv4_hint)
-                        data.ch_ipv4_hint = ipv4_hint;
-                    end
-                    if ~isempty(ipv6_hint)
-                        data.ch_ipv6_hint = ipv6_hint;
-                    end
-                    if ~isempty(fieldnames(enum_hint))
-                        data.ch_enum_hint = enum_hint;
-                    end
-                    if ~isempty(fieldnames(fixedstring_hint))
-                        data.ch_fixedstring_hint = fixedstring_hint;
-                    end
-                    if ~isempty(fieldnames(decimal_hint))
-                        data.ch_decimal_hint = decimal_hint;
                     end
                 end
-            catch
-                % Proceed without hint if DESCRIBE fails (e.g. no SELECT privilege)
+                if ~isempty(nullable_hint)
+                    data.ch_nullable_hint = nullable_hint;
+                end
+                if ~isempty(fieldnames(datetime64_hint))
+                    data.ch_datetime64_hint = datetime64_hint;
+                end
+                if ~isempty(fieldnames(date_type_hint))
+                    data.ch_date_type_hint = date_type_hint;
+                end
+                if ~isempty(fieldnames(nullable_int_hint))
+                    data.ch_nullable_int_hint = nullable_int_hint;
+                end
+                if ~isempty(fieldnames(lc_hint))
+                    data.ch_lc_hint = lc_hint;
+                end
+                if ~isempty(ipv4_hint)
+                    data.ch_ipv4_hint = ipv4_hint;
+                end
+                if ~isempty(ipv6_hint)
+                    data.ch_ipv6_hint = ipv6_hint;
+                end
+                if ~isempty(fieldnames(enum_hint))
+                    data.ch_enum_hint = enum_hint;
+                end
+                if ~isempty(fieldnames(fixedstring_hint))
+                    data.ch_fixedstring_hint = fixedstring_hint;
+                end
+                if ~isempty(fieldnames(decimal_hint))
+                    data.ch_decimal_hint = decimal_hint;
+                end
             end
             try
                 clickhouse_mex('insert', obj.ptr, char(tableName), data);
