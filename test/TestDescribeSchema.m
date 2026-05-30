@@ -14,17 +14,12 @@ classdef TestDescribeSchema < matlab.unittest.TestCase
                 "CREATE TABLE IF NOT EXISTS ch_matlab_test.describe_schema (" ...
                 "  c_int32 Int32, c_float64 Float64, c_nullable_int Nullable(Int32)" ...
                 ") ENGINE = MergeTree() ORDER BY c_int32"]);
-            tc.Client.query([ ...
-                "CREATE TABLE IF NOT EXISTS ch_matlab_test.describe_simple (" ...
-                "  c_int32 Int32, c_float64 Float64" ...
-                ") ENGINE = MergeTree() ORDER BY c_int32"]);
         end
     end
 
     methods (TestClassTeardown)
         function teardownClass(tc)
             tc.Client.query("DROP TABLE IF EXISTS ch_matlab_test.describe_schema");
-            tc.Client.query("DROP TABLE IF EXISTS ch_matlab_test.describe_simple");
             delete(tc.Client);
         end
     end
@@ -32,7 +27,6 @@ classdef TestDescribeSchema < matlab.unittest.TestCase
     methods (TestMethodSetup)
         function methodSetup(tc)
             tc.Client.query("TRUNCATE TABLE ch_matlab_test.describe_schema");
-            tc.Client.query("TRUNCATE TABLE ch_matlab_test.describe_simple");
         end
     end
 
@@ -92,21 +86,29 @@ classdef TestDescribeSchema < matlab.unittest.TestCase
             tc.verifyEqual(r.c_nullable_int, 99.0, 'AbsTol', 1e-9);
         end
 
-        function testInsertWithEmptySchemaSkipsDescribe(tc)
-            % Passing [] as schema must bypass DESCRIBE entirely. For a
-            % table with no Nullable / DateTime / LowCardinality / etc.
-            % columns, no hints are needed, so the insert should succeed
-            % even though we didn't query the schema.
+        function testInsertWithBadSchemaThrows(tc)
+            % Passing anything other than a valid schema table (from
+            % describe()) must throw ClickHouse:badSchema rather than
+            % silently producing a malformed insert.
             data = table( ...
-                int32([1; 2]), ...
-                [10.0; 20.0], ...
-                'VariableNames', {'c_int32','c_float64'});
+                int32([1]), [1.0], int32([1]), ...
+                'VariableNames', {'c_int32','c_float64','c_nullable_int'});
 
-            tc.Client.insert("ch_matlab_test.describe_simple", data, []);
+            % Empty array — likely user error
+            tc.verifyError( ...
+                @() tc.Client.insert("ch_matlab_test.describe_schema", data, []), ...
+                "ClickHouse:badSchema");
 
-            r = tc.Client.query("SELECT * FROM ch_matlab_test.describe_simple ORDER BY c_int32");
-            tc.verifyEqual(r.c_int32,   int32([1; 2]));
-            tc.verifyEqual(r.c_float64, [10.0; 20.0], 'AbsTol', 1e-9);
+            % Struct instead of table — user passed the wrong thing
+            tc.verifyError( ...
+                @() tc.Client.insert("ch_matlab_test.describe_schema", data, struct()), ...
+                "ClickHouse:badSchema");
+
+            % Table without a 'type' column — not a schema
+            bad = table([1;2], 'VariableNames', {'name'});
+            tc.verifyError( ...
+                @() tc.Client.insert("ch_matlab_test.describe_schema", data, bad), ...
+                "ClickHouse:badSchema");
         end
 
         function testSchemaIsReusable(tc)

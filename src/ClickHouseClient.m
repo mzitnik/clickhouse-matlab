@@ -134,6 +134,8 @@ classdef ClickHouseClient < handle
             %   schema (optional) — DESCRIBE TABLE result from obj.describe().
             %   If omitted, it is fetched on demand. Pass it explicitly to
             %   skip the round-trip on repeated inserts into the same table.
+            %   Must be a table with a 'type' column; anything else throws
+            %   ClickHouse:badSchema.
             arguments
                 obj
                 tableName (1,1) string
@@ -200,11 +202,14 @@ classdef ClickHouseClient < handle
                 try
                     schema = obj.describe(tableName);
                 catch
-                    schema = [];
+                    schema = table();   % silent: proceed without hints
                 end
+            elseif ~istable(schema) || ~ismember('type', schema.Properties.VariableNames)
+                error("ClickHouse:badSchema", ...
+                    "schema must be a table returned by obj.describe(); got class=%s.", ...
+                    class(schema));
             end
-            if ~isempty(schema) && istable(schema) && height(schema) > 0 && ...
-                    ismember('type', schema.Properties.VariableNames)
+            if height(schema) > 0
                 desc = schema;
                 data_fields = fieldnames(data);
                 nullable_hint    = {};
