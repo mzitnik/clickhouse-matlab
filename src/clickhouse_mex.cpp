@@ -19,6 +19,7 @@
 #include <clickhouse/types/types.h>
 #include <vector>
 #include <unordered_set>
+#include <cstring>
 
 #ifndef CLICKHOUSE_MATLAB_VERSION
 #error "CLICKHOUSE_MATLAB_VERSION not defined by build system — set via CMake"
@@ -1232,6 +1233,7 @@ static void cmd_insert(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[
             // LowCardinality(Float64): check before NaN scan
             if (lc_cols.count(fname) && lc_cols.at(fname) == "Float64") {
                 auto lc = std::make_shared<ColumnLowCardinalityT<ColumnFloat64>>();
+                lc->Reserve(n);
                 for (size_t i = 0; i < n; i++) lc->Append(data[i]);
                 block.AppendColumn(fname, lc);
                 break;
@@ -1249,6 +1251,8 @@ static void cmd_insert(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[
                 if (has_nan || force_nullable) {
                     auto inner = std::make_shared<ColumnDateTime64>(prec);
                     auto nulls = std::make_shared<ColumnUInt8>();
+                    inner->Reserve(n);
+                    nulls->Reserve(n);
                     for (size_t i = 0; i < n; i++) {
                         bool is_null = std::isnan(data[i]);
                         nulls->Append(is_null ? 1 : 0);
@@ -1257,6 +1261,7 @@ static void cmd_insert(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[
                     block.AppendColumn(fname, std::make_shared<ColumnNullable>(inner, nulls));
                 } else {
                     auto col = std::make_shared<ColumnDateTime64>(prec);
+                    col->Reserve(n);
                     for (size_t i = 0; i < n; i++)
                         col->Append((int64_t)std::round(data[i] * scale));
                     block.AppendColumn(fname, col);
@@ -1267,6 +1272,8 @@ static void cmd_insert(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[
                     if (has_nan || force_nullable) {
                         auto inner = std::make_shared<ColumnDate>();
                         auto nulls = std::make_shared<ColumnUInt8>();
+                        inner->Reserve(n);
+                        nulls->Reserve(n);
                         for (size_t i = 0; i < n; i++) {
                             bool is_null = std::isnan(data[i]);
                             nulls->Append(is_null ? 1 : 0);
@@ -1275,6 +1282,7 @@ static void cmd_insert(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[
                         block.AppendColumn(fname, std::make_shared<ColumnNullable>(inner, nulls));
                     } else {
                         auto col = std::make_shared<ColumnDate>();
+                        col->Reserve(n);
                         for (size_t i = 0; i < n; i++)
                             col->AppendRaw((uint16_t)(data[i] / 86400.0));
                         block.AppendColumn(fname, col);
@@ -1283,6 +1291,8 @@ static void cmd_insert(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[
                     if (has_nan || force_nullable) {
                         auto inner = std::make_shared<ColumnDate32>();
                         auto nulls = std::make_shared<ColumnUInt8>();
+                        inner->Reserve(n);
+                        nulls->Reserve(n);
                         for (size_t i = 0; i < n; i++) {
                             bool is_null = std::isnan(data[i]);
                             nulls->Append(is_null ? 1 : 0);
@@ -1291,6 +1301,7 @@ static void cmd_insert(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[
                         block.AppendColumn(fname, std::make_shared<ColumnNullable>(inner, nulls));
                     } else {
                         auto col = std::make_shared<ColumnDate32>();
+                        col->Reserve(n);
                         for (size_t i = 0; i < n; i++)
                             col->AppendRaw((int32_t)(data[i] / 86400.0));
                         block.AppendColumn(fname, col);
@@ -1299,6 +1310,8 @@ static void cmd_insert(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[
                     if (has_nan || force_nullable) {
                         auto inner = std::make_shared<ColumnDateTime>();
                         auto nulls = std::make_shared<ColumnUInt8>();
+                        inner->Reserve(n);
+                        nulls->Reserve(n);
                         for (size_t i = 0; i < n; i++) {
                             bool is_null = std::isnan(data[i]);
                             nulls->Append(is_null ? 1 : 0);
@@ -1307,6 +1320,7 @@ static void cmd_insert(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[
                         block.AppendColumn(fname, std::make_shared<ColumnNullable>(inner, nulls));
                     } else {
                         auto col = std::make_shared<ColumnDateTime>();
+                        col->Reserve(n);
                         for (size_t i = 0; i < n; i++)
                             col->Append((uint32_t)data[i]);
                         block.AppendColumn(fname, col);
@@ -1318,6 +1332,8 @@ static void cmd_insert(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[
                 if (has_nan || force_nullable) {
                     auto inner = std::make_shared<ColumnDecimal>(prec, scale);
                     auto nulls = std::make_shared<ColumnUInt8>();
+                    inner->Reserve(n);
+                    nulls->Reserve(n);
                     for (size_t i = 0; i < n; i++) {
                         bool is_null = std::isnan(data[i]);
                         nulls->Append(is_null ? 1 : 0);
@@ -1326,6 +1342,7 @@ static void cmd_insert(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[
                     block.AppendColumn(fname, std::make_shared<ColumnNullable>(inner, nulls));
                 } else {
                     auto col = std::make_shared<ColumnDecimal>(prec, scale);
+                    col->Reserve(n);
                     for (size_t i = 0; i < n; i++)
                         col->Append(static_cast<Int128>(std::round(data[i] * scale_factor)));
                     block.AppendColumn(fname, col);
@@ -1334,48 +1351,61 @@ static void cmd_insert(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[
                 // Nullable integer: MATLAB double (NaN=NULL) → Nullable(IntType)
                 const std::string& int_type = ni_it->second;
                 auto nulls = std::make_shared<ColumnUInt8>();
+                nulls->Reserve(n);
                 for (size_t i = 0; i < n; i++) nulls->Append(std::isnan(data[i]) ? 1 : 0);
                 if (int_type == "Int8") {
                     auto inner = std::make_shared<ColumnInt8>();
+                    inner->Reserve(n);
                     for (size_t i = 0; i < n; i++) inner->Append(std::isnan(data[i]) ? 0 : (int8_t)data[i]);
                     block.AppendColumn(fname, std::make_shared<ColumnNullable>(inner, nulls));
                 } else if (int_type == "Int16") {
                     auto inner = std::make_shared<ColumnInt16>();
+                    inner->Reserve(n);
                     for (size_t i = 0; i < n; i++) inner->Append(std::isnan(data[i]) ? 0 : (int16_t)data[i]);
                     block.AppendColumn(fname, std::make_shared<ColumnNullable>(inner, nulls));
                 } else if (int_type == "Int32") {
                     auto inner = std::make_shared<ColumnInt32>();
+                    inner->Reserve(n);
                     for (size_t i = 0; i < n; i++) inner->Append(std::isnan(data[i]) ? 0 : (int32_t)data[i]);
                     block.AppendColumn(fname, std::make_shared<ColumnNullable>(inner, nulls));
                 } else if (int_type == "Int64") {
                     auto inner = std::make_shared<ColumnInt64>();
+                    inner->Reserve(n);
                     for (size_t i = 0; i < n; i++) inner->Append(std::isnan(data[i]) ? 0LL : (int64_t)data[i]);
                     block.AppendColumn(fname, std::make_shared<ColumnNullable>(inner, nulls));
                 } else if (int_type == "UInt8") {
                     auto inner = std::make_shared<ColumnUInt8>();
+                    inner->Reserve(n);
                     for (size_t i = 0; i < n; i++) inner->Append(std::isnan(data[i]) ? 0 : (uint8_t)data[i]);
                     block.AppendColumn(fname, std::make_shared<ColumnNullable>(inner, nulls));
                 } else if (int_type == "UInt16") {
                     auto inner = std::make_shared<ColumnUInt16>();
+                    inner->Reserve(n);
                     for (size_t i = 0; i < n; i++) inner->Append(std::isnan(data[i]) ? 0 : (uint16_t)data[i]);
                     block.AppendColumn(fname, std::make_shared<ColumnNullable>(inner, nulls));
                 } else if (int_type == "UInt32") {
                     auto inner = std::make_shared<ColumnUInt32>();
+                    inner->Reserve(n);
                     for (size_t i = 0; i < n; i++) inner->Append(std::isnan(data[i]) ? 0u : (uint32_t)data[i]);
                     block.AppendColumn(fname, std::make_shared<ColumnNullable>(inner, nulls));
                 } else if (int_type == "UInt64") {
                     auto inner = std::make_shared<ColumnUInt64>();
+                    inner->Reserve(n);
                     for (size_t i = 0; i < n; i++) inner->Append(std::isnan(data[i]) ? 0ULL : (uint64_t)data[i]);
                     block.AppendColumn(fname, std::make_shared<ColumnNullable>(inner, nulls));
                 } else {
                     // fallback to Float64
                     auto col = std::make_shared<ColumnFloat64>();
-                    for (size_t i = 0; i < n; i++) col->Append(data[i]);
+                    auto& v = col->GetWritableData();
+                    v.resize(n);
+                    if (n) std::memcpy(v.data(), data, n * sizeof(double));
                     block.AppendColumn(fname, col);
                 }
             } else if (has_nan || force_nullable) {
                 auto inner = std::make_shared<ColumnFloat64>();
                 auto nulls = std::make_shared<ColumnUInt8>();
+                inner->Reserve(n);
+                nulls->Reserve(n);
                 for (size_t i = 0; i < n; i++) {
                     bool is_null = std::isnan(data[i]);
                     nulls->Append(is_null ? 1 : 0);
@@ -1384,7 +1414,9 @@ static void cmd_insert(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[
                 block.AppendColumn(fname, std::make_shared<ColumnNullable>(inner, nulls));
             } else {
                 auto col = std::make_shared<ColumnFloat64>();
-                for (size_t i = 0; i < n; i++) col->Append(data[i]);
+                auto& v = col->GetWritableData();
+                v.resize(n);
+                if (n) std::memcpy(v.data(), data, n * sizeof(double));
                 block.AppendColumn(fname, col);
             }
             break;
@@ -1396,11 +1428,14 @@ static void cmd_insert(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[
             bool force_nullable = nullable_cols.count(fname) > 0;
             if (lc_cols.count(fname)) {
                 auto lc = std::make_shared<ColumnLowCardinalityT<ColumnFloat32>>();
+                lc->Reserve(n);
                 for (size_t i = 0; i < n; i++) lc->Append(data[i]);
                 block.AppendColumn(fname, lc);
             } else if (has_nan || force_nullable) {
                 auto inner = std::make_shared<ColumnFloat32>();
                 auto nulls = std::make_shared<ColumnUInt8>();
+                inner->Reserve(n);
+                nulls->Reserve(n);
                 for (size_t i = 0; i < n; i++) {
                     bool is_null = std::isnan(data[i]);
                     nulls->Append(is_null ? 1 : 0);
@@ -1409,7 +1444,9 @@ static void cmd_insert(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[
                 block.AppendColumn(fname, std::make_shared<ColumnNullable>(inner, nulls));
             } else {
                 auto col = std::make_shared<ColumnFloat32>();
-                for (size_t i = 0; i < n; i++) col->Append(data[i]);
+                auto& v = col->GetWritableData();
+                v.resize(n);
+                if (n) std::memcpy(v.data(), data, n * sizeof(float));
                 block.AppendColumn(fname, col);
             }
             break;
@@ -1418,11 +1455,14 @@ static void cmd_insert(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[
             int8_T* data = mxGetInt8s(fd);
             if (lc_cols.count(fname)) {
                 auto lc = std::make_shared<ColumnLowCardinalityT<ColumnInt8>>();
+                lc->Reserve(n);
                 for (size_t i = 0; i < n; i++) lc->Append(data[i]);
                 block.AppendColumn(fname, lc);
             } else {
                 auto col = std::make_shared<ColumnInt8>();
-                for (size_t i = 0; i < n; i++) col->Append(data[i]);
+                auto& v = col->GetWritableData();
+                v.resize(n);
+                if (n) std::memcpy(v.data(), data, n * sizeof(int8_t));
                 block.AppendColumn(fname, col);
             }
             break;
@@ -1431,11 +1471,14 @@ static void cmd_insert(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[
             int16_T* data = mxGetInt16s(fd);
             if (lc_cols.count(fname)) {
                 auto lc = std::make_shared<ColumnLowCardinalityT<ColumnInt16>>();
+                lc->Reserve(n);
                 for (size_t i = 0; i < n; i++) lc->Append(data[i]);
                 block.AppendColumn(fname, lc);
             } else {
                 auto col = std::make_shared<ColumnInt16>();
-                for (size_t i = 0; i < n; i++) col->Append(data[i]);
+                auto& v = col->GetWritableData();
+                v.resize(n);
+                if (n) std::memcpy(v.data(), data, n * sizeof(int16_t));
                 block.AppendColumn(fname, col);
             }
             break;
@@ -1444,11 +1487,14 @@ static void cmd_insert(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[
             int32_T* data = mxGetInt32s(fd);
             if (lc_cols.count(fname)) {
                 auto lc = std::make_shared<ColumnLowCardinalityT<ColumnInt32>>();
+                lc->Reserve(n);
                 for (size_t i = 0; i < n; i++) lc->Append(data[i]);
                 block.AppendColumn(fname, lc);
             } else {
                 auto col = std::make_shared<ColumnInt32>();
-                for (size_t i = 0; i < n; i++) col->Append(data[i]);
+                auto& v = col->GetWritableData();
+                v.resize(n);
+                if (n) std::memcpy(v.data(), data, n * sizeof(int32_t));
                 block.AppendColumn(fname, col);
             }
             break;
@@ -1457,11 +1503,14 @@ static void cmd_insert(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[
             int64_T* data = mxGetInt64s(fd);
             if (lc_cols.count(fname)) {
                 auto lc = std::make_shared<ColumnLowCardinalityT<ColumnInt64>>();
+                lc->Reserve(n);
                 for (size_t i = 0; i < n; i++) lc->Append(data[i]);
                 block.AppendColumn(fname, lc);
             } else {
                 auto col = std::make_shared<ColumnInt64>();
-                for (size_t i = 0; i < n; i++) col->Append(data[i]);
+                auto& v = col->GetWritableData();
+                v.resize(n);
+                if (n) std::memcpy(v.data(), data, n * sizeof(int64_t));
                 block.AppendColumn(fname, col);
             }
             break;
@@ -1471,6 +1520,7 @@ static void cmd_insert(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[
             // on the wire; clickhouse-cpp has no separate Bool type code.
             auto col = std::make_shared<ColumnUInt8>();
             mxLogical* data = mxGetLogicals(fd);
+            col->Reserve(n);
             for (size_t i = 0; i < n; i++) col->Append(data[i] ? 1 : 0);
             block.AppendColumn(fname, col);
             break;
@@ -1479,11 +1529,14 @@ static void cmd_insert(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[
             uint8_T* data = mxGetUint8s(fd);
             if (lc_cols.count(fname)) {
                 auto lc = std::make_shared<ColumnLowCardinalityT<ColumnUInt8>>();
+                lc->Reserve(n);
                 for (size_t i = 0; i < n; i++) lc->Append(data[i]);
                 block.AppendColumn(fname, lc);
             } else {
                 auto col = std::make_shared<ColumnUInt8>();
-                for (size_t i = 0; i < n; i++) col->Append(data[i]);
+                auto& v = col->GetWritableData();
+                v.resize(n);
+                if (n) std::memcpy(v.data(), data, n * sizeof(uint8_t));
                 block.AppendColumn(fname, col);
             }
             break;
@@ -1492,11 +1545,14 @@ static void cmd_insert(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[
             uint16_T* data = mxGetUint16s(fd);
             if (lc_cols.count(fname)) {
                 auto lc = std::make_shared<ColumnLowCardinalityT<ColumnUInt16>>();
+                lc->Reserve(n);
                 for (size_t i = 0; i < n; i++) lc->Append(data[i]);
                 block.AppendColumn(fname, lc);
             } else {
                 auto col = std::make_shared<ColumnUInt16>();
-                for (size_t i = 0; i < n; i++) col->Append(data[i]);
+                auto& v = col->GetWritableData();
+                v.resize(n);
+                if (n) std::memcpy(v.data(), data, n * sizeof(uint16_t));
                 block.AppendColumn(fname, col);
             }
             break;
@@ -1505,11 +1561,14 @@ static void cmd_insert(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[
             uint32_T* data = mxGetUint32s(fd);
             if (lc_cols.count(fname)) {
                 auto lc = std::make_shared<ColumnLowCardinalityT<ColumnUInt32>>();
+                lc->Reserve(n);
                 for (size_t i = 0; i < n; i++) lc->Append(data[i]);
                 block.AppendColumn(fname, lc);
             } else {
                 auto col = std::make_shared<ColumnUInt32>();
-                for (size_t i = 0; i < n; i++) col->Append(data[i]);
+                auto& v = col->GetWritableData();
+                v.resize(n);
+                if (n) std::memcpy(v.data(), data, n * sizeof(uint32_t));
                 block.AppendColumn(fname, col);
             }
             break;
@@ -1518,11 +1577,14 @@ static void cmd_insert(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[
             uint64_T* data = mxGetUint64s(fd);
             if (lc_cols.count(fname)) {
                 auto lc = std::make_shared<ColumnLowCardinalityT<ColumnUInt64>>();
+                lc->Reserve(n);
                 for (size_t i = 0; i < n; i++) lc->Append(data[i]);
                 block.AppendColumn(fname, lc);
             } else {
                 auto col = std::make_shared<ColumnUInt64>();
-                for (size_t i = 0; i < n; i++) col->Append(data[i]);
+                auto& v = col->GetWritableData();
+                v.resize(n);
+                if (n) std::memcpy(v.data(), data, n * sizeof(uint64_t));
                 block.AppendColumn(fname, col);
             }
             break;
@@ -1574,6 +1636,8 @@ static void cmd_insert(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[
                 if (has_null_sentinel || force_nullable) {
                     auto inner = std::make_shared<ColumnString>();
                     auto nulls = std::make_shared<ColumnUInt8>();
+                    inner->Reserve(n);
+                    nulls->Reserve(n);
                     for (size_t i = 0; i < n; i++) {
                         const mxArray* cell = mxGetCell(fd, i);
                         bool is_null = !cell || (mxIsEmpty(cell) && !mxIsChar(cell) && !mxIsCell(cell));
@@ -1586,6 +1650,7 @@ static void cmd_insert(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[
                     block.AppendColumn(fname, std::make_shared<ColumnNullable>(inner, nulls));
                 } else if (lc_cols.count(fname) && lc_cols.at(fname) == "String") {
                     auto lc = std::make_shared<ColumnLowCardinalityT<ColumnString>>();
+                    lc->Reserve(n);
                     for (size_t i = 0; i < n; i++) {
                         const mxArray* cell = mxGetCell(fd, i);
                         if (!cell || mxIsEmpty(cell)) { lc->Append(""); continue; }
@@ -1596,6 +1661,7 @@ static void cmd_insert(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[
                     block.AppendColumn(fname, lc);
                 } else if (ipv4_cols.count(fname)) {
                     auto col = std::make_shared<ColumnIPv4>();
+                    col->Reserve(n);
                     for (size_t i = 0; i < n; i++) {
                         const mxArray* cell = mxGetCell(fd, i);
                         if (!cell || mxIsEmpty(cell)) { col->Append(uint32_t(0)); continue; }
@@ -1606,6 +1672,7 @@ static void cmd_insert(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[
                     block.AppendColumn(fname, col);
                 } else if (ipv6_cols.count(fname)) {
                     auto col = std::make_shared<ColumnIPv6>();
+                    col->Reserve(n);
                     for (size_t i = 0; i < n; i++) {
                         const mxArray* cell = mxGetCell(fd, i);
                         if (!cell || mxIsEmpty(cell)) { col->Append(std::string_view("::")); continue; }
@@ -1644,6 +1711,7 @@ static void cmd_insert(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[
                     TypeRef etype = is8 ? Type::CreateEnum8(items) : Type::CreateEnum16(items);
                     if (is8) {
                         auto col = std::make_shared<ColumnEnum8>(etype);
+                        col->Reserve(n);
                         for (size_t i = 0; i < n; i++) {
                             const mxArray* cell = mxGetCell(fd, i);
                             if (!cell || mxIsEmpty(cell)) { col->Append(int8_t(0)); continue; }
@@ -1654,6 +1722,7 @@ static void cmd_insert(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[
                         block.AppendColumn(fname, col);
                     } else {
                         auto col = std::make_shared<ColumnEnum16>(etype);
+                        col->Reserve(n);
                         for (size_t i = 0; i < n; i++) {
                             const mxArray* cell = mxGetCell(fd, i);
                             if (!cell || mxIsEmpty(cell)) { col->Append(int16_t(0)); continue; }
@@ -1666,6 +1735,7 @@ static void cmd_insert(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[
                 } else if (fixedstring_cols.count(fname)) {
                     size_t fsn = fixedstring_cols.at(fname);
                     auto col = std::make_shared<ColumnFixedString>(fsn);
+                    col->Reserve(n);
                     for (size_t i = 0; i < n; i++) {
                         const mxArray* cell = mxGetCell(fd, i);
                         if (!cell || mxIsEmpty(cell)) { col->Append(std::string(fsn, '\0')); continue; }
@@ -1677,6 +1747,7 @@ static void cmd_insert(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[
                 } else {
                     // Plain String column
                     auto col = std::make_shared<ColumnString>();
+                    col->Reserve(n);
                     for (size_t i = 0; i < n; i++) {
                         const mxArray* cell = mxGetCell(fd, i);
                         if (!cell || mxIsEmpty(cell)) { col->Append(""); continue; }
@@ -1689,11 +1760,13 @@ static void cmd_insert(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[
             } else if (is_arr_str_col) {
                 // Array(String) column: cell of cell-of-char
                 auto arr_col = std::make_shared<ColumnArray>(std::make_shared<ColumnString>());
+                arr_col->Reserve(n);
                 for (size_t i = 0; i < n; i++) {
                     const mxArray* cell = mxGetCell(fd, i);
                     auto inner = std::make_shared<ColumnString>();
                     if (cell && !mxIsEmpty(cell)) {
                         size_t m = mxGetNumberOfElements(cell);
+                        inner->Reserve(m);
                         for (size_t j = 0; j < m; j++) {
                             const mxArray* elem = mxGetCell(cell, j);
                             if (!elem || mxIsEmpty(elem)) { inner->Append(""); continue; }
@@ -1728,6 +1801,7 @@ static void cmd_insert(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[
                 };
 
                 auto arr_col = std::make_shared<ColumnArray>(make_inner_col());
+                arr_col->Reserve(n);
 
                 for (size_t i = 0; i < n; i++) {
                     const mxArray* cell = mxGetCell(fd, i);
@@ -1735,16 +1809,16 @@ static void cmd_insert(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[
                     if (cell && !mxIsEmpty(cell)) {
                         size_t m = mxGetNumberOfElements(cell);
                         switch (inner_class) {
-                        case mxDOUBLE_CLASS: { auto ic=inner->As<ColumnFloat64>(); double*   d=mxGetDoubles(cell);  for(size_t j=0;j<m;j++) ic->Append(d[j]); break; }
-                        case mxSINGLE_CLASS: { auto ic=inner->As<ColumnFloat32>(); float*    d=mxGetSingles(cell); for(size_t j=0;j<m;j++) ic->Append(d[j]); break; }
-                        case mxINT8_CLASS:   { auto ic=inner->As<ColumnInt8>();    int8_T*   d=mxGetInt8s(cell);   for(size_t j=0;j<m;j++) ic->Append(d[j]); break; }
-                        case mxINT16_CLASS:  { auto ic=inner->As<ColumnInt16>();   int16_T*  d=mxGetInt16s(cell);  for(size_t j=0;j<m;j++) ic->Append(d[j]); break; }
-                        case mxINT32_CLASS:  { auto ic=inner->As<ColumnInt32>();   int32_T*  d=mxGetInt32s(cell);  for(size_t j=0;j<m;j++) ic->Append(d[j]); break; }
-                        case mxINT64_CLASS:  { auto ic=inner->As<ColumnInt64>();   int64_T*  d=mxGetInt64s(cell);  for(size_t j=0;j<m;j++) ic->Append(d[j]); break; }
-                        case mxUINT8_CLASS:  { auto ic=inner->As<ColumnUInt8>();   uint8_T*  d=mxGetUint8s(cell);  for(size_t j=0;j<m;j++) ic->Append(d[j]); break; }
-                        case mxUINT16_CLASS: { auto ic=inner->As<ColumnUInt16>();  uint16_T* d=mxGetUint16s(cell); for(size_t j=0;j<m;j++) ic->Append(d[j]); break; }
-                        case mxUINT32_CLASS: { auto ic=inner->As<ColumnUInt32>();  uint32_T* d=mxGetUint32s(cell); for(size_t j=0;j<m;j++) ic->Append(d[j]); break; }
-                        case mxUINT64_CLASS: { auto ic=inner->As<ColumnUInt64>();  uint64_T* d=mxGetUint64s(cell); for(size_t j=0;j<m;j++) ic->Append(d[j]); break; }
+                        case mxDOUBLE_CLASS: { auto ic=inner->As<ColumnFloat64>(); double*   d=mxGetDoubles(cell);  auto& v=ic->GetWritableData(); v.resize(m); if(m) std::memcpy(v.data(),d,m*sizeof(double));   break; }
+                        case mxSINGLE_CLASS: { auto ic=inner->As<ColumnFloat32>(); float*    d=mxGetSingles(cell); auto& v=ic->GetWritableData(); v.resize(m); if(m) std::memcpy(v.data(),d,m*sizeof(float));    break; }
+                        case mxINT8_CLASS:   { auto ic=inner->As<ColumnInt8>();    int8_T*   d=mxGetInt8s(cell);   auto& v=ic->GetWritableData(); v.resize(m); if(m) std::memcpy(v.data(),d,m*sizeof(int8_t));   break; }
+                        case mxINT16_CLASS:  { auto ic=inner->As<ColumnInt16>();   int16_T*  d=mxGetInt16s(cell);  auto& v=ic->GetWritableData(); v.resize(m); if(m) std::memcpy(v.data(),d,m*sizeof(int16_t));  break; }
+                        case mxINT32_CLASS:  { auto ic=inner->As<ColumnInt32>();   int32_T*  d=mxGetInt32s(cell);  auto& v=ic->GetWritableData(); v.resize(m); if(m) std::memcpy(v.data(),d,m*sizeof(int32_t));  break; }
+                        case mxINT64_CLASS:  { auto ic=inner->As<ColumnInt64>();   int64_T*  d=mxGetInt64s(cell);  auto& v=ic->GetWritableData(); v.resize(m); if(m) std::memcpy(v.data(),d,m*sizeof(int64_t));  break; }
+                        case mxUINT8_CLASS:  { auto ic=inner->As<ColumnUInt8>();   uint8_T*  d=mxGetUint8s(cell);  auto& v=ic->GetWritableData(); v.resize(m); if(m) std::memcpy(v.data(),d,m*sizeof(uint8_t));  break; }
+                        case mxUINT16_CLASS: { auto ic=inner->As<ColumnUInt16>();  uint16_T* d=mxGetUint16s(cell); auto& v=ic->GetWritableData(); v.resize(m); if(m) std::memcpy(v.data(),d,m*sizeof(uint16_t)); break; }
+                        case mxUINT32_CLASS: { auto ic=inner->As<ColumnUInt32>();  uint32_T* d=mxGetUint32s(cell); auto& v=ic->GetWritableData(); v.resize(m); if(m) std::memcpy(v.data(),d,m*sizeof(uint32_t)); break; }
+                        case mxUINT64_CLASS: { auto ic=inner->As<ColumnUInt64>();  uint64_T* d=mxGetUint64s(cell); auto& v=ic->GetWritableData(); v.resize(m); if(m) std::memcpy(v.data(),d,m*sizeof(uint64_t)); break; }
                         default: break;
                         }
                     }
@@ -1754,6 +1828,7 @@ static void cmd_insert(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs[
             } else {
                 // All cells are empty — insert as empty Float64 array column
                 auto arr_col = std::make_shared<ColumnArray>(std::make_shared<ColumnFloat64>());
+                arr_col->Reserve(n);
                 for (size_t i = 0; i < n; i++) {
                     arr_col->AppendAsColumn(std::make_shared<ColumnFloat64>());
                 }
