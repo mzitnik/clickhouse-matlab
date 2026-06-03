@@ -41,5 +41,14 @@ jobs:
           release: R2024b
           cache: true
 
-      - name: Run tests (ClickHouse ${{ matrix.clickhouse_version }})
-        run: ./test/run_tests.sh ${{ matrix.clickhouse_version }}
+      - name: Start ClickHouse ${{ matrix.clickhouse_version }}
+        run: ./test/start_clickhouse.sh ${{ matrix.clickhouse_version }}
+
+      - name: Build MEX and run tests
+        uses: matlab-actions/run-command@v2
+        with:
+          command: build; addpath(fullfile(pwd,'src')); addpath(fullfile(pwd,'test')); run_all_tests
+
+      - name: Stop ClickHouse
+        if: always()
+        run: ./test/stop_clickhouse.sh
