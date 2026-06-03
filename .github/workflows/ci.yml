@@ -44,10 +44,24 @@ jobs:
       - name: Start ClickHouse ${{ matrix.clickhouse_version }}
         run: ./test/start_clickhouse.sh ${{ matrix.clickhouse_version }}
 
-      - name: Build MEX and run tests
+      - name: Build MEX
         uses: matlab-actions/run-command@v2
         with:
-          command: build; addpath(fullfile(pwd,'src')); addpath(fullfile(pwd,'test')); run_all_tests
+          command: build
+
+      - name: Run tests
+        uses: matlab-actions/run-tests@v2
+        with:
+          source-folder: src
+          select-by-folder: test
+          test-results-junit: test-results/results.xml
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-clickhouse-${{ matrix.clickhouse_version }}
+          path: test-results/results.xml
 
       - name: Stop ClickHouse
         if: always()

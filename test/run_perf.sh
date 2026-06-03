@@ -119,7 +119,7 @@ done
 
 SAMPLES="${SAMPLES:-30}"
 "$MATLAB" -batch \
-    "addpath(fullfile('$ROOT_DIR','src')); addpath(fullfile('$ROOT_DIR','test')); run_perf(fullfile('$ROOT_DIR','bench_results'), $SAMPLES)"
+    "addpath(fullfile('$ROOT_DIR','src')); addpath(fullfile('$ROOT_DIR','test')); addpath(fullfile('$ROOT_DIR','perf')); run_perf(fullfile('$ROOT_DIR','bench_results'), $SAMPLES)"
 
 # ── Refresh trend plot (best-effort; doesn't fail the run) ───────────────────
 echo "=== Plotting trend ==="

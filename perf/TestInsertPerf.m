@@ -1,4 +1,4 @@
-% test/TestInsertPerf.m
+% perf/TestInsertPerf.m
 classdef TestInsertPerf < matlab.perftest.TestCase
     % Run with: runperf('TestInsertPerf')
     %

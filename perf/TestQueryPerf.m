@@ -1,4 +1,4 @@
-% test/TestQueryPerf.m
+% perf/TestQueryPerf.m
 classdef TestQueryPerf < matlab.perftest.TestCase
     % Run with: runperf('TestQueryPerf')
     %

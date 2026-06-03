@@ -125,8 +125,8 @@ Ordered by effort vs. payoff on a shared dev machine.
 
 | file | purpose |
 |---|---|
-| `test/TestInsertPerf.m` | perftest class — `insert` measurements |
-| `test/TestQueryPerf.m` | perftest class — `query` measurements |
+| `perf/TestInsertPerf.m` | perftest class — `insert` measurements |
+| `perf/TestQueryPerf.m` | perftest class — `query` measurements |
 | `test/run_perf.m` | runs both classes, writes `<timestamp>.csv` |
 | `test/run_perf.sh` | bash driver: build, start CH, run MATLAB, plot, tear down |
 | `test/plot_perf.py` | reads `bench_results/*.csv`, writes the two PNGs |
