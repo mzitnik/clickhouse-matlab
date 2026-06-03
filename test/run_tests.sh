@@ -58,17 +58,10 @@ if [ -z "${CMAKE:-}" ]; then
     echo "Found CMake: $CMAKE"
 fi
 CMAKE_FLAGS="${CMAKE_FLAGS:-}"
-CONTAINER="clickhouse-matlab-test"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(dirname "$SCRIPT_DIR")"
-DOCKER_DIR="$SCRIPT_DIR/docker"
 
-cleanup() {
-    docker rm -f "$CONTAINER" >/dev/null 2>&1 || true
-}
-trap cleanup EXIT
-
-echo "=== ClickHouse $VERSION ==="
+trap '"$SCRIPT_DIR/stop_clickhouse.sh"' EXIT
 
 # ── Build MEX (incremental — only recompiles changed files) ──────────────────
 echo "=== Building MEX ==="
@@ -81,39 +74,8 @@ cp "$ROOT_DIR/build/clickhouse_mex.mexmaca64" "$ROOT_DIR/src/" 2>/dev/null || \
 cp "$ROOT_DIR/build/clickhouse_mex.mexw64"    "$ROOT_DIR/src/" 2>/dev/null || true
 echo "=== MEX ready ==="
 
-# Remove any leftover container from a previous run
-cleanup
-
-docker run -d \
-    --name "$CONTAINER" \
-    -p 9000:9000 \
-    -p 9440:9440 \
-    -v "$DOCKER_DIR/clickhouse-config.xml:/etc/clickhouse-server/config.d/tls.xml:ro" \
-    -v "$DOCKER_DIR/clickhouse-users.xml:/etc/clickhouse-server/users.d/clickhouse-users.xml:ro" \
-    -v "$DOCKER_DIR/server.crt:/etc/clickhouse-server/server.crt:ro" \
-    -v "$DOCKER_DIR/server.key:/etc/clickhouse-server/server.key:ro" \
-    --ulimit nofile=262144:262144 \
-    --health-cmd "clickhouse-client --query 'SELECT 1'" \
-    --health-interval 5s \
-    --health-timeout 5s \
-    --health-retries 12 \
-    "clickhouse/clickhouse-server:$VERSION" >/dev/null
-
-echo -n "Waiting for ClickHouse to be healthy"
-for i in $(seq 1 60); do
-    status="$(docker inspect --format='{{.State.Health.Status}}' "$CONTAINER" 2>/dev/null || echo 'starting')"
-    if [ "$status" = "healthy" ]; then
-        echo " ready."
-        break
-    fi
-    if [ "$i" -eq 60 ]; then
-        echo " timed out."
-        docker logs "$CONTAINER" >&2
-        exit 1
-    fi
-    echo -n "."
-    sleep 1
-done
+# ── Start ClickHouse (shared with CI) ────────────────────────────────────────
+"$SCRIPT_DIR/start_clickhouse.sh" "$VERSION"
 
 "$MATLAB" -batch \
     "addpath(fullfile('$ROOT_DIR','src')); addpath(fullfile('$ROOT_DIR','test')); run_all_tests()"
