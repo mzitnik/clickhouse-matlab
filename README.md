@@ -12,7 +12,7 @@ ClickHouse driver for MATLAB. Speaks the native TCP protocol (not HTTP) via a ME
 
 ## Requirements
 
-- **MATLAB**: R2024b or newer (older releases likely work but are untested)
+- **MATLAB**: R2023b – R2025a tested in CI; newer releases likely work
 - **CMake**: ≥ 3.20
 - **C++ compiler**: g++-9 recommended — avoids GLIBCXX mismatches with MATLAB's bundled libstdc++. Override with `-DCMAKE_CXX_COMPILER=...` for a different compiler.
 - **Platform**: Linux, macOS, Windows. MEX outputs are `.mexa64` / `.mexmaca64` / `.mexw64` respectively.

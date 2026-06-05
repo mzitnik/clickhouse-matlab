@@ -16,12 +16,13 @@ concurrency:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
 
     strategy:
       fail-fast: false
       matrix:
         clickhouse_version: ['25.3', '25.8', 'latest']
+        matlab_release: ['R2023b', 'R2024a', 'R2024b', 'R2025a']
 
     env:
       # Batch Licensing Token for MathWorks Online License.
@@ -38,7 +39,7 @@ jobs:
       - name: Set up MATLAB
         uses: matlab-actions/setup-matlab@v2
         with:
-          release: R2024b
+          release: ${{ matrix.matlab_release }}
           cache: true
 
       - name: Start ClickHouse ${{ matrix.clickhouse_version }}
@@ -60,7 +61,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: test-results-clickhouse-${{ matrix.clickhouse_version }}
+          name: test-results-clickhouse-${{ matrix.clickhouse_version }}-matlab-${{ matrix.matlab_release }}
           path: test-results/results.xml
 
       - name: Stop ClickHouse
