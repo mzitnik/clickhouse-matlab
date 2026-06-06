@@ -9,6 +9,9 @@ classdef ClickHouseClient < handle
     %     options.settings   - containers.Map of string->string server settings
     %     options.useragent  - string, custom client name
     %     options.maxRetries - integer >= 0, retry attempts on query/insert failure (default 3)
+    %     options.compression - Compression enum: Compression.None | Compression.LZ4
+    %                          | Compression.ZSTD. Native-protocol block compression.
+    %                          Default Compression.LZ4 (was: no compression).
     %     options.tls        - struct with fields:
     %       .enabled           logical  (true to enable TLS)
     %       .skip_verification logical  (true to skip cert check, dev only)
@@ -31,6 +34,8 @@ classdef ClickHouseClient < handle
             %   options.useragent  - Parsed but NOT applied. The clickhouse-cpp
             %                        ClientOptions API does not expose a client name
             %                        setter. No error is thrown.
+            %   options.compression - Supported. Default Compression.LZ4. Set
+            %                        Compression.None for no compression. See class doc.
             arguments
                 host     (1,1) string
                 port     (1,1) double  = 9000
@@ -45,6 +50,21 @@ classdef ClickHouseClient < handle
                 obj.maxRetries = options.maxRetries;
             end
             options.maxRetries = obj.maxRetries;
+
+            % compression: client-level native-protocol block compression.
+            % Defaults to LZ4 (a behavior change from no-compression). Must be a
+            % Compression enum value; converted to its int8 code for transport
+            % across the MEX boundary (an enum value object cannot be read via
+            % the C MEX API, but its int8 code can).
+            if ~isfield(options, 'compression') || isempty(options.compression)
+                options.compression = Compression.LZ4;
+            end
+            if ~isa(options.compression, 'Compression') || ~isscalar(options.compression)
+                error("ClickHouse:badOption", ...
+                    "options.compression must be a scalar Compression enum value " + ...
+                    "(Compression.None, Compression.LZ4, or Compression.ZSTD).");
+            end
+            options.compression = int8(options.compression);
 
             % Expand containers.Map settings to cell arrays for MEX
             if isfield(options, 'settings') && isa(options.settings, 'containers.Map')

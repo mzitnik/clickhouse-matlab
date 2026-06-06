@@ -112,6 +112,17 @@ static void cmd_connect(int nlhs, mxArray* plhs[], int nrhs, const mxArray* prhs
             }
         }
 
+        // compression: client-level native-protocol block compression. The
+        // MATLAB Compression enum is int8-backed with the same underlying
+        // values as clickhouse-cpp's CompressionMethod, so this is a direct
+        // cast. ClickHouseClient injects a default and validates the type, so
+        // an out-of-range value never reaches here.
+        mxArray* comp = mxGetField(opt, 0, "compression");
+        if (comp && !mxIsEmpty(comp)) {
+            int m = static_cast<int>(mxGetScalar(comp));
+            opts.SetCompressionMethod(static_cast<CompressionMethod>(m));
+        }
+
         // useragent: SetClientName does not exist on ClientOptions — omitted.
         // settings:  SetSetting does not exist on ClientOptions — omitted.
     }

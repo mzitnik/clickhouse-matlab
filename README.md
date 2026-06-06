@@ -5,6 +5,7 @@ ClickHouse driver for MATLAB. Speaks the native TCP protocol (not HTTP) via a ME
 ## Features
 
 - Native TCP protocol with optional TLS
+- Native-protocol block compression (LZ4 by default, ZSTD or none selectable)
 - Auto-reconnect and protocol-level retry, tunable via `maxRetries`
 - Bidirectional conversion: `query` returns a MATLAB `table`; `insert` accepts a `table` or scalar struct of arrays
 - Broad ClickHouse type coverage (see [Supported types](#supported-types))
@@ -68,6 +69,21 @@ c.insert('demo', data);
 delete(c);
 ```
 
+### Compression
+
+Block compression on the native protocol is set per connection via
+`options.compression` and defaults to `Compression.LZ4`:
+
+```matlab
+% Use ZSTD (higher ratio, more CPU) instead of the LZ4 default
+opts = struct('compression', Compression.ZSTD);
+c = ClickHouseClient('localhost', 9000, 'default', '', opts);
+
+% ...or disable compression entirely
+opts = struct('compression', Compression.None);
+c = ClickHouseClient('localhost', 9000, 'default', '', opts);
+```
+
 ## Connection options
 
 `ClickHouseClient(host, port, user, password, options)` accepts an `options` struct:
@@ -78,6 +94,7 @@ delete(c);
 | `tls.skip_verification` | logical | `false` | Disable certificate verification (dev only). |
 | `tls.ca_file` | string | `""` | Path to CA bundle for verification. |
 | `maxRetries` | integer | `3` | Retry attempts on query/insert failure. `0` = fail-fast (no ping-before-query, no protocol-level retry, no MATLAB-level retry). |
+| `compression` | `Compression` enum | `Compression.LZ4` | Native-protocol block compression: `Compression.None`, `Compression.LZ4`, or `Compression.ZSTD`. **Default changed to LZ4** — set `Compression.None` to restore the previous no-compression behavior. |
 | `settings` | containers.Map | — | Parsed but **not** applied — clickhouse-cpp's `ClientOptions` does not expose per-connection settings. |
 | `useragent` | string | — | Parsed but **not** applied — `ClientOptions` does not expose `SetClientName`. |
 
