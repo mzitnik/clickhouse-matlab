@@ -42,7 +42,30 @@ def load_runs(bench_dir: Path) -> pd.DataFrame:
     df.loc[matched, "parameter"] = extracted.loc[matched, 2]
     df["parameter"] = df["parameter"].fillna("").astype(str)
 
-    return df.sort_values(["suite", "test_name", "parameter", "timestamp"])
+    # The parameter cell may carry multiple comma-separated key=value pairs,
+    # e.g. "Comp=lz4,NumRows=rows_1k" (order not guaranteed). Split into a
+    # dedicated `compression` column and a batch-only `parameter` column so
+    # param_rank() and the existing plots keep working. Legacy CSVs without a
+    # Comp key default to compression "none".
+    def parse_param(cell: str) -> pd.Series:
+        parts = dict(
+            kv.split("=", 1) for kv in cell.split(",") if "=" in kv
+        )
+        comp = parts.pop("Comp", "none")
+        # The remaining single key is the batch dimension (NumRows / Limit).
+        if parts:
+            k, v = next(iter(parts.items()))
+            batch_param = f"{k}={v}"
+        else:
+            batch_param = cell  # no key=value structure; leave as-is
+        return pd.Series({"compression": comp, "parameter": batch_param})
+
+    parsed = df["parameter"].apply(parse_param)
+    df["compression"] = parsed["compression"]
+    df["parameter"] = parsed["parameter"]
+
+    return df.sort_values(
+        ["suite", "test_name", "compression", "parameter", "timestamp"])
 
 
 def param_rank(p: str) -> float:
@@ -91,26 +114,31 @@ def plot(df: pd.DataFrame, output: Path) -> None:
         ax_r = axes[1][col_idx]  # throughput
         sub = df[df["suite"] == suite]
         params = sorted(sub["parameter"].unique(), key=param_rank)
+        comps = sorted(sub["compression"].unique())
 
         for param in params:
-            g = sub[sub["parameter"] == param].sort_values("timestamp")
-            label = f"{g['test_name'].iloc[0]} [{param}]"
+            for comp in comps:
+                g = sub[(sub["parameter"] == param) &
+                        (sub["compression"] == comp)].sort_values("timestamp")
+                if g.empty:
+                    continue
+                label = f"{g['test_name'].iloc[0]} [{param}] {comp}"
 
-            line, = ax_t.plot(g["timestamp"], g["median_sec"], marker="o",
-                              label=label)
-            color = line.get_color()
-            ax_t.fill_between(g["timestamp"],
-                              g["median_sec"] - g["std_sec"],
-                              g["median_sec"] + g["std_sec"],
-                              color=color, alpha=0.15)
-            annotate(ax_t, g["timestamp"], g["median_sec"], fmt_sec)
+                line, = ax_t.plot(g["timestamp"], g["median_sec"], marker="o",
+                                  label=label)
+                color = line.get_color()
+                ax_t.fill_between(g["timestamp"],
+                                  g["median_sec"] - g["std_sec"],
+                                  g["median_sec"] + g["std_sec"],
+                                  color=color, alpha=0.15)
+                annotate(ax_t, g["timestamp"], g["median_sec"], fmt_sec)
 
-            ax_r.plot(g["timestamp"], g["throughput_rps"], marker="o",
-                      color=color, label=label)
-            ax_r.fill_between(g["timestamp"],
-                              g["throughput_low"], g["throughput_high"],
-                              color=color, alpha=0.15)
-            annotate(ax_r, g["timestamp"], g["throughput_rps"], fmt_rps)
+                ax_r.plot(g["timestamp"], g["throughput_rps"], marker="o",
+                          color=color, label=label)
+                ax_r.fill_between(g["timestamp"],
+                                  g["throughput_low"], g["throughput_high"],
+                                  color=color, alpha=0.15)
+                annotate(ax_r, g["timestamp"], g["throughput_rps"], fmt_rps)
 
         for ax in (ax_t, ax_r):
             ax.set_yscale("log")
@@ -151,24 +179,28 @@ def plot_by_batch(df: pd.DataFrame, output: Path) -> None:
         sub = df[df["batch"] == batch]
 
         for suite in sorted(sub["suite"].unique()):
-            g = sub[sub["suite"] == suite].sort_values("timestamp")
-            label = f"{suite} / {g['test_name'].iloc[0]}"
+            for comp in sorted(sub["compression"].unique()):
+                g = sub[(sub["suite"] == suite) &
+                        (sub["compression"] == comp)].sort_values("timestamp")
+                if g.empty:
+                    continue
+                label = f"{suite} / {g['test_name'].iloc[0]} {comp}"
 
-            line, = ax_t.plot(g["timestamp"], g["median_sec"], marker="o",
-                              label=label)
-            color = line.get_color()
-            ax_t.fill_between(g["timestamp"],
-                              g["median_sec"] - g["std_sec"],
-                              g["median_sec"] + g["std_sec"],
-                              color=color, alpha=0.15)
-            annotate(ax_t, g["timestamp"], g["median_sec"], fmt_sec)
+                line, = ax_t.plot(g["timestamp"], g["median_sec"], marker="o",
+                                  label=label)
+                color = line.get_color()
+                ax_t.fill_between(g["timestamp"],
+                                  g["median_sec"] - g["std_sec"],
+                                  g["median_sec"] + g["std_sec"],
+                                  color=color, alpha=0.15)
+                annotate(ax_t, g["timestamp"], g["median_sec"], fmt_sec)
 
-            ax_r.plot(g["timestamp"], g["throughput_rps"], marker="o",
-                      color=color, label=label)
-            ax_r.fill_between(g["timestamp"],
-                              g["throughput_low"], g["throughput_high"],
-                              color=color, alpha=0.15)
-            annotate(ax_r, g["timestamp"], g["throughput_rps"], fmt_rps)
+                ax_r.plot(g["timestamp"], g["throughput_rps"], marker="o",
+                          color=color, label=label)
+                ax_r.fill_between(g["timestamp"],
+                                  g["throughput_low"], g["throughput_high"],
+                                  color=color, alpha=0.15)
+                annotate(ax_r, g["timestamp"], g["throughput_rps"], fmt_rps)
 
         for ax in (ax_t, ax_r):
             ax.grid(True, which="both", linestyle=":", alpha=0.5)
@@ -180,6 +212,51 @@ def plot_by_batch(df: pd.DataFrame, output: Path) -> None:
 
     fig.suptitle("clickhouse-matlab driver — per batch size")
     fig.autofmt_xdate()
+    fig.tight_layout()
+    fig.savefig(output, dpi=150)
+    print(f"wrote {output}")
+
+
+def plot_compression(df: pd.DataFrame, output: Path) -> None:
+    """Latest run only: per (suite, test), throughput vs batch size, one line
+    per compression method. Answers 'is lz4/zstd worth it at this batch size?'"""
+    df = df.copy()
+    df["rows"] = df["parameter"].map(param_rank)
+    df["throughput_rps"]  = df["rows"] / df["median_sec"]
+    df["throughput_low"]  = df["rows"] / (df["median_sec"] + df["std_sec"])
+    df["throughput_high"] = df["rows"] / (df["median_sec"] - df["std_sec"]).clip(lower=1e-12)
+
+    # Only the most recent run, so the comparison is apples-to-apples.
+    # run_perf.m stamps every row of a run with one shared timestamp, so the
+    # exact max timestamp selects precisely that run (insert + query rows).
+    latest_ts = df["timestamp"].max()
+    df = df[df["timestamp"] == latest_ts]
+
+    series = sorted(set(zip(df["suite"], df["test_name"])))
+    n = len(series)
+    if n == 0:
+        print("no rows for compression plot; skipping")
+        return
+    fig, axes = plt.subplots(1, n, figsize=(5 * n, 5), squeeze=False)
+
+    for col_idx, (suite, test_name) in enumerate(series):
+        ax = axes[0][col_idx]
+        sub = df[(df["suite"] == suite) & (df["test_name"] == test_name)]
+        for comp in sorted(sub["compression"].unique()):
+            g = sub[sub["compression"] == comp].sort_values("rows")
+            line, = ax.plot(g["rows"], g["throughput_rps"], marker="o", label=comp)
+            ax.fill_between(g["rows"], g["throughput_low"], g["throughput_high"],
+                            color=line.get_color(), alpha=0.15)
+            annotate(ax, g["rows"], g["throughput_rps"], fmt_rps)
+        ax.set_xscale("log")
+        ax.set_yscale("log")
+        ax.grid(True, which="both", linestyle=":", alpha=0.5)
+        ax.set_title(f"{suite} / {test_name}")
+        ax.set_xlabel("rows (log)")
+        ax.set_ylabel("rows / sec (log)")
+        ax.legend(fontsize=8, loc="best", title="compression")
+
+    fig.suptitle(f"clickhouse-matlab — compression comparison (run {latest_ts:%Y-%m-%d %H:%M UTC})")
     fig.tight_layout()
     fig.savefig(output, dpi=150)
     print(f"wrote {output}")
@@ -202,6 +279,8 @@ def main() -> None:
     plot(df, output)
     by_batch_output = output.with_name(output.stem + "_by_batch" + output.suffix)
     plot_by_batch(df, by_batch_output)
+    comp_output = output.with_name(output.stem + "_compression" + output.suffix)
+    plot_compression(df, comp_output)
 
 
 if __name__ == "__main__":
